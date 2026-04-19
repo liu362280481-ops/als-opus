@@ -1,0 +1,114 @@
+{
+  "verdict": "PARTIAL",
+  "score": 5,
+  "seed": 42,
+  "sim_steps": 60000,
+  "num_closed": 8,
+  "p_range": 0.19891009297495665,
+  "p_max": 0.19918242717309065,
+  "p_min": 0.00027233419813398155,
+  "m_sum": 104.87270120856239,
+  "permeability": 0.007214286186817326,
+  "full_excision": [
+    "SURVIVED",
+    "SURVIVED",
+    "SURVIVED",
+    "SURVIVED",
+    "SURVIVED",
+    "SURVIVED",
+    "SURVIVED",
+    "SURVIVED"
+  ],
+  "full_excision_detail": [
+    {
+      "unit_id": 1,
+      "area": 27,
+      "M_before": 5.888878514813195,
+      "M_after": 8.252909101211696,
+      "ratio": 1.4014398631336091,
+      "verdict": "SURVIVED"
+    },
+    {
+      "unit_id": 2,
+      "area": 12,
+      "M_before": 2.2469308997344846,
+      "M_after": 1.766280262683917,
+      "ratio": 0.7860857056648022,
+      "verdict": "SURVIVED"
+    },
+    {
+      "unit_id": 3,
+      "area": 18,
+      "M_before": 6.840465334565543,
+      "M_after": 7.074363247862438,
+      "ratio": 1.034193274992681,
+      "verdict": "SURVIVED"
+    },
+    {
+      "unit_id": 4,
+      "area": 21,
+      "M_before": 5.767116972227711,
+      "M_after": 6.117334327810337,
+      "ratio": 1.0607265911561037,
+      "verdict": "SURVIVED"
+    },
+    {
+      "unit_id": 5,
+      "area": 21,
+      "M_before": 8.632114858671146,
+      "M_after": 8.578930288812716,
+      "ratio": 0.9938387554240148,
+      "verdict": "SURVIVED"
+    },
+    {
+      "unit_id": 6,
+      "area": 26,
+      "M_before": 4.573419523550222,
+      "M_after": 5.568233014892691,
+      "ratio": 1.2175207161735955,
+      "verdict": "SURVIVED"
+    },
+    {
+      "unit_id": 7,
+      "area": 14,
+      "M_before": 11.36944565469583,
+      "M_after": 12.274846235691271,
+      "ratio": 1.0796345404528898,
+      "verdict": "SURVIVED"
+    },
+    {
+      "unit_id": 8,
+      "area": 15,
+      "M_before": 6.025923134798587,
+      "M_after": 6.651957846171079,
+      "ratio": 1.1038902581835748,
+      "verdict": "SURVIVED"
+    }
+  ],
+  "partial_excision": [
+    "RECOVERED",
+    "RECOVERED",
+    "RECOVERED",
+    "RECOVERED",
+    "RECOVERED",
+    "RECOVERED",
+    "RECOVERED",
+    "RECOVERED"
+  ],
+  "is_metabolizing": true,
+  "all_units_collapsed": false,
+  "config": {
+    "D_P": 0.001,
+    "K1": 0.12,
+    "K_M": 0.08,
+    "K_BG": 0.0001,
+    "P_DECAY": 0.1,
+    "K_GROWTH": 1.5,
+    "K_DECAY_M": 0.1,
+    "ALPHA_EXP_P": 15.0,
+    "S_SUPPLY": 0.015,
+    "NEIGHBOR_INHIBIT_STRENGTH": 10.0,
+    "MAX_STEPS": 60000,
+    "RANDOM_SEED": 42
+  }
+}
