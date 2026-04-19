@@ -1,229 +1,169 @@
-# ALS V2 FPGA 部署指南
+# ALS-OPUS：自创生反应-扩散格子模拟器
 
-> 给 OpenClaw 的完整执行方案
-> Ubuntu 台机 (i5 + 32GB + 2TB SSD) → ALINX AXU2CGB-E 开发板
-
----
-
-## 第一步：环境准备
-
-### 1.1 检查系统环境
-```bash
-lsb_release -a
-df -h /
-free -h
-uname -a
-```
-
-### 1.2 安装 Vivado 2024.1
-
-1. 从 AMD/Xilinx 官网下载 Vivado 2024.1 WebPack（免费）
-2. 安装时**只勾选** Zynq UltraScale+ MPSoC（节省空间）
-3. 预计安装体积：约 30GB
-4. 安装后配置环境变量：
-```bash
-echo 'source /tools/Xilinx/Vivado/2024.1/settings64.sh' >> ~/.bashrc
-source ~/.bashrc
-vivado -version
-```
+> **核心问题：** 生命是什么？能否在128×128的离散格子上，用数学方程让"膜"自发形成、维持、并最终死亡？
 
 ---
 
-## 第二步：解压项目
+## 核心直觉
 
-```bash
-# 将压缩包传到 Ubuntu 后解压
-tar -xzf als_v2_final_20260323.tar.gz
-cd als_v2
+把格子想象成一个池塘：
 
-# 验证解压成功
-ls -la
-```
+| 符号 | 含义 | 比喻 |
+|------|------|------|
+| **S** | 基底（Substrate） | 水的液面 |
+| **P** | 催化剂（Product） | 溶解在水里的化学物质 |
+| **M** | 膜（Membrane） | 在物质浓稀交界处"生长"出来的肥皂膜 |
 
 ---
 
-## 第三步：下载 ALINX BSP
+## 三条核心规则
 
-```bash
-# 创建 FPGA 项目目录
-mkdir -p ~/fpga_projects
-cd ~/fpga_projects
+### 规则1：扩散（所有物质向四周均匀扩散）
 
-# 从 ALINX 官网下载 AXU2CGB-E 开发板支持包
-# 官方链接: https://www.alinx.com/product/176.html
+```
+S和P会从浓度高的地方向低的地方扩散
+D_S = 0.20（快扩散）
+D_P = 0.001（极慢扩散，P几乎待在原地）
+```
 
-# 解压 BSP（根据下载的文件名）
-unzip alinx_axu2cgb.zip
+这导致P在空间上形成"浓度梯度"——有的地方P高，有的地方P低。
+
+---
+
+### 规则2：Hill函数自催化（催化剂自我增强）
+
+```
+P在S存在时会自我复制：
+    P + S → 2P
+
+但这不是线性增长，是"正反馈"：
+当P很少时，增长很慢；
+当P超过某个阈值（K_M=0.08）时，增长急剧加速；
+这就是"Hill函数"的S形曲线。
+
+数学形式：
+    hill = P² / (P² + K_M²)
+    P增长 = K1 × S × hill
 ```
 
 ---
 
-## 第四步：LED 闪烁验证（必做）
-
-创建 `~/fpga_projects/led_blink/` 目录：
-
-### 4.1 创建 Verilog 文件 led_blink.v
-```verilog
-module led_blink(
-    input wire clk,
-    input wire rst_n,
-    output reg led
-);
-parameter COUNT_MAX = 50_000_000;
-reg [25:0] counter;
-always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-        counter <= 0;
-        led <= 0;
-    end else begin
-        if (counter >= COUNT_MAX - 1) begin
-            counter <= 0;
-            led <= ~led;
-        end else begin
-            counter <= counter + 1;
-        end
-    end
-end
-endmodule
-```
-
-### 4.2 创建约束文件（根据原理图确定引脚）
-```bash
-# 参考 ALINX AXU2CGB-E 原理图
-# 系统时钟: E3 (50MHz)
-# LED: H5, H6, J4, J5
-# 复位: T18
-```
-
-### 4.3 综合并烧录
-```bash
-source /tools/Xilinx/Vivado/2024.1/settings64.sh
-cd ~/fpga_projects/led_blink
-vivado -mode batch -source create_project.tcl
-vivado -mode batch -source implement.tcl
-```
-
-LED 闪烁成功 → 工具链正常 → 进入下一步
-
----
-
-## 第五步：ALS 移植
-
-### 5.1 理解架构
+### 规则3：膜在P梯度处生长，在无P时衰减
 
 ```
-┌─────────────────────────┐
-│   ARM (PS)              │  ← 计算 interior mask, TCP 传输
-└──────────┬──────────────┘
-           │ AXI4-Lite
-┌──────────▼──────────────┐
-│   FPGA PL               │  ← 核心计算引擎
-│  Phase 1: 扩散引擎      │
-│  Phase 2: 反应引擎      │
-│  Phase 3: 膜更新引擎    │
-│  Phase 4: S补给+噪声    │
-└─────────────────────────┘
-```
+膜M的生长位置 = P梯度大的地方（P的"浓度差"陡峭处）
+膜M的衰减速度 = 被P梯度保护的程度
 
-### 5.2 数值格式
-- **Q8.8 定点数**：8位整数 + 8位小数
-- 范围：[-128, 127.996]
-- 精度：1/256 ≈ 0.0039
-
-### 5.3 BRAM 资源
-```
-3个场 × 双缓冲 × 128×128 × 16bit = 192KB
-exp LUT: 256 × 8bit = 256B
-interior mask: 128×128 × 1bit = 2KB
-总计 ≈ 195KB (BRAM 约 32%)
-```
-
-### 5.4 实现步骤
-
-#### Week 2：基础框架
-- BRAM 双缓冲设计
-- 行缓冲读取逻辑
-- exp 查找表生成
-
-#### Week 3：核心计算
-- Phase 1: 各向异性扩散
-- Phase 2: Hill 函数反应
-- Phase 3: 膜更新
-- Phase 4: S 补给 + LFSR 噪声
-
-#### Week 4：PS 侧开发
-- PetaLinux 部署
-- C 程序：connected_component_labeling + binary_fill_holes
-- TCP 传输到 Mac
-
----
-
-## 第六步：与 Mac 联调
-
-### Mac 端准备
-```bash
-# Mac 上运行 Python 可视化接收端
-cd ~/novel2character
-python3 app.py
-# 访问 http://localhost:5001
-```
-
-### FPGA 端
-- 100MHz 时钟 → 约 380 fps
-- 通过 TCP 实时传输场数据
-- Mac 端显示热图 + 诊断
-
----
-
-## 第七步：验证
-
-### 目标
-- 运行 60000+ 帧
-- 诊断分数 ≥ 5/6
-- 长时间稳定运行 72 小时
-
-### 诊断命令（在 Mac 上）
-```bash
-cd ~/als_v2
-python3 run_diagnostics.py
+膜的屏障效应 = exp(-15 × M)
+当M很大时，S几乎无法通过膜扩散 → 膜内外浓度差继续维持
 ```
 
 ---
 
-## 关键参数（从 config.py）
+## 三个场如何交互
 
-| 参数 | 值 | 说明 |
+```
+每一步（step）:
+
+  ┌─────────────────────────────────────────┐
+  │ 1. 扩散：S和P各自向四周扩散            │
+  │    diffusion.py                          │
+  ├─────────────────────────────────────────┤
+  │ 2. 反应：P在S存在时自催化增长           │
+  │    P + S → 2P （Hill函数驱动）          │
+  │    reaction.py                           │
+  ├─────────────────────────────────────────┤
+  │ 3. 膜更新：膜在P梯度边界生长/衰减      │
+  │    membrane.py                          │
+  │    M在P高梯度处↑，在P接近0时↓           │
+  ├─────────────────────────────────────────┤
+  │ 4. S补给：外部持续向膜外供S              │
+  │    substrate.py                          │
+  └─────────────────────────────────────────┘
+```
+
+---
+
+## 关键参数
+
+| 参数 | 值 | 意义 |
 |------|-----|------|
-| GRID_SIZE | 128 | 场大小 |
-| D_P | 0.001 | P 扩散系数 |
-| D_S | 0.20 | S 扩散系数 |
-| ALPHA_EXP_P | 15.0 | 膜屏障强度 |
-| K1 | 0.12 | 反应速率 |
-| K_M | 0.08 | Hill 常数 |
-| K_GROWTH | 1.5 | 膜生长速率 |
-| K_DECAY_M | 0.1 | 膜衰减速率 |
-| S_SUPPLY | 0.015 | S 补给率 |
-| DT | 0.05 | 时间步长 |
+| `GRID_SIZE` | 128 | 128×128的离散格子 |
+| `D_S` | 0.20 | 基底扩散速度 |
+| `D_P` | 0.001 | 催化剂扩散速度（极慢）|
+| `ALPHA_EXP_P` | 15.0 | 膜的屏障强度 |
+| `K1` | 0.12 | 反应速率 |
+| `K_M` | 0.08 | Hill函数阈值 |
+| `K_GROWTH` | 1.5 | 膜生长速度 |
+| `K_DECAY_M` | 0.1 | 膜衰减速度 |
+| `S_SUPPLY` | 0.015 | S补给率 |
+| `DECAY_RAMP_START` | 5000 | P衰减斜坡启动步数 |
+| `DECAY_RAMP_END` | 15000 | P衰减斜坡结束步数 |
 
 ---
 
-## 风险与缓解
+## 自创生判据（诊断测试）
 
-| 风险 | 严重度 | 缓解 |
-|------|--------|------|
-| Q8.8 精度偏离 | 高 | Week 3 仿真对比 |
-| PS-PL 延迟 | 中 | 允许 100 帧延迟 |
-| BRAM 冲突 | 中 | 乒乓双缓冲 |
-| 综合慢 | 低 | 32GB 内存足够 |
+| 测试 | 通过条件 | 结果 |
+|------|---------|------|
+| 封闭膜单元存在 | 有多个膜围成的封闭区域 | ✅ 8个 |
+| P梯度 > 0.01 | 膜内有明显P浓度差 | ✅ 0.199 |
+| 膜渗透率 < 0.1 | 膜基本闭合 | ✅ 0.0072 |
+| 完全切除→膜坍塌 | 杀死内部P后膜崩溃 | ❌ 膜反而增强 |
+| 部分切除→恢复 | 局部破坏后自修复 | ✅ |
+| 持续代谢 | 长时间维持自维持 | ✅ |
 
----
-
-## 联系
-
-- Mac 端实验结果：见 `results/diagnostic_results.json`
-- 完整源码：见 `FPGA_HANDOFF.md`
-- 项目压缩包：`als_v2_final_20260323.tar.gz`
+**当前得分：5/6**
 
 ---
 
-*此 README 由 Claude Code 生成，按照步骤执行即可完成 FPGA 部署。*
+## 如何运行
+
+```bash
+cd ALS-OPUS
+
+# 完整运行（60000步）
+python3 run_simulation.py
+
+# 查看诊断结果
+python3 run_diagnostics.py
+
+# 切除实验（验证自创生）
+python3 run_excision.py
+
+# 10小时连续压测（无干预直到死亡）
+python3 run_logs/als_lifecycle_runner.py
+```
+
+---
+
+## 文件结构
+
+```
+ALS-OPUS/
+├── config.py              ← 所有参数（甜区已验证）
+├── core/
+│   ├── engine.py          ← 主循环
+│   ├── diffusion.py       ← 扩散算子
+│   ├── reaction.py         ← Hill函数反应
+│   ├── membrane.py         ← 膜更新
+│   └── substrate.py        ← S补给
+├── analysis/
+│   ├── detector.py        ← 封闭膜单元检测
+│   ├── excision.py        ← 切除实验
+│   ├── metabolism.py       ← 代谢验证
+│   └── permeability.py     ← 渗透率测量
+├── run_simulation.py      ← 主运行脚本
+├── run_diagnostics.py      ← 诊断评分
+└── run_excision.py         ← 切除实验
+```
+
+---
+
+## 为什么"切除测试"失败（Score 5/6的缺陷）
+
+切除测试的逻辑是：把膜内部的P全部杀死，看膜是否崩溃。
+
+**失败原因：** `boundary = sqrt(P方差)`（膜边界检测）是对称的——当内部P被杀死后，膜内外浓度差反而更大，反而驱动膜继续生长甚至变厚。
+
+这意味着当前模型产生的是**静态Turing斑图**，而不是真正的新陈代谢依赖型自创生。要达到真正的自创生，需要让膜的存亡直接依赖于P的持续供给——而当前的膜保护机制（neighbor inhibit）使得膜在P枯竭后仍然能够维持。
